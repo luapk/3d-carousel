@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>2D to 3D Carousel (Vercel Edition)</title>
+    <style>
+        body { margin: 0; background: #1a1a1a; color: white; font-family: sans-serif; overflow: hidden; }
+        canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; }
+        #ui { position: absolute; top: 20px; left: 20px; z-index: 10; background: rgba(0,0,0,0.8); padding: 25px; border-radius: 12px; border: 1px solid #333; max-width: 300px; }
+        h2 { margin-top: 0; font-size: 1.2rem; }
+        p { font-size: 0.9rem; color: #ccc; }
+        input[type="file"] { margin-bottom: 15px; width: 100%; }
+        button { background: #0070f3; color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; width: 100%; font-weight: bold; }
+        button:hover { background: #0051b3; }
+        #status-box { margin-top: 15px; display: none; padding: 10px; background: #333; border-radius: 6px; font-size: 0.9rem; text-align: center; }
+        .spinner { display: inline-block; width: 16px; height: 16px; border: 3px solid rgba(255,255,255,.3); border-radius: 50%; border-top-color: #fff; animation: spin 1s ease-in-out infinite; margin-right: 8px; vertical-align: middle; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h2>2D to 3D Generator</h2>
+        <p>Upload an image to generate a 3D object using Meshy AI.</p>
+        <input type="file" id="imageInput" accept="image/png, image/jpeg">
+        <button id="uploadBtn">Generate 3D Object</button>
+        <div id="status-box">
+            <span class="spinner" id="spinner"></span>
+            <span id="status-text">Uploading...</span>
+        </div>
+    </div>
+
+    <!-- Three.js Module Import -->
+    <script type="module">
+        import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+        import { GLTFLoader } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/loaders/GLTFLoader.js';
+        import { OrbitControls } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/controls/OrbitControls.js';
+
+        // --- 1. Scene Setup ---
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        camera.position.set(0, 1.5, 5);
+
+        // Lighting
+        scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+        dirLight.position.set(5, 10, 7);
+        scene.add(dirLight);
+
+        const loader = new GLTFLoader();
+        let carouselObjects = [];
+
+        // --- 2. API Interaction ---
+        const statusBox = document.getElementById('status-box');
+        const statusText = document.getElementById('status-text');
+        const spinner = document.getElementById('spinner');
+
+        document.getElementById('uploadBtn').addEventListener('click', async () => {
+            const fileInput = document.getElementById('imageInput');
+            if (!fileInput.files[0]) return alert("Please select an image first!");
+
+            statusBox.style.display = 'block';
+            statusText.innerText = "Uploading image...";
+            spinner.style.display = 'inline-block';
+            
+            const formData = new FormData();
+            formData.append("file", fileInput.files[0]);
+
+            try {
+                // Step A: Send image to FastAPI backend
+                const response = await fetch('/api/generate-3d', { method: 'POST', body: formData });
+                const data = await response.json();
+                
+                if (data.task_id) {
+                    pollStatus(data.task_id);
+                } else if (data.error) {
+                    showError(data.error);
+                } else {
+                    showError("Unknown error occurred.");
+                }
+            } catch (err) {
+                showError("Network error. Make sure your Vercel app is live.");
+            }
+        });
+
+        function showError(msg) {
+            spinner.style.display = 'none';
+            statusText.innerText = msg;
+            statusText.style.color = '#ff6b6b';
+        }
+
+        // Step B: Poll backend for completion status
+        async function pollStatus(taskId) {
+            const interval = setInterval(async () => {
+                try {
+                    const res = await fetch(`/api/status/${taskId}`);
+                    const statusData = await res.json();
+
+                    if (statusData.status === 'success') {
+                        clearInterval(interval);
+                        spinner.style.display = 'none';
+                        statusText.innerText = 'Success! Loading 3D Model...';
+                        statusText.style.color = '#51cf66';
+                        
+                        // Pass URL to Three.js
+                        loadModel(statusData.model_url);
+                        
+                    } else if (statusData.status === 'processing') {
+                        statusText.innerText = `AI Generating... ${statusData.progress}%`;
+                        statusText.style.color = '#fff';
+                    } else if (statusData.status === 'failed') {
+                        clearInterval(interval);
+                        showError(statusData.error || 'AI generation failed.');
+                    }
+                } catch (err) {
+                    clearInterval(interval);
+                    showError('Lost connection to server.');
+                }
+            }, 3000); // Poll every 3 seconds
+        }
+
+        // --- 3. 3D Rendering ---
+        function loadModel(url) {
+            loader.load(url, (gltf) => {
+                const model = gltf.scene;
+                
+                // Center the model based on its bounding box
+                const box = new THREE.Box3().setFromObject(model);
+                const center = box.getCenter(new THREE.Vector3());
+                model.position.sub(center);
+                
+                const wrapper = new THREE.Group();
+                wrapper.add(model);
+                
+                // Add to scene and tracking array
+                scene.add(wrapper);
+                carouselObjects.push(wrapper);
+                
+                statusText.innerText = "Model Loaded!";
+                
+                // If we want multiple, we arrange them in a circle
+                arrangeCarousel();
+                
+            }, undefined, (error) => {
+                showError("Error displaying 3D model.");
+            });
+        }
+
+        function arrangeCarousel() {
+            const radius = 2.5;
+            carouselObjects.forEach((wrapper, i) => {
+                const angle = (i * (Math.PI * 2)) / carouselObjects.length;
+                wrapper.position.x = Math.cos(angle) * radius;
+                wrapper.position.z = Math.sin(angle) * radius;
+            });
+        }
+
+        // --- 4. Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = Date.now() * 0.001;
+
+            carouselObjects.forEach((wrapper, i) => {
+                const angle = time * 0.5 + (i * (Math.PI * 2) / carouselObjects.length);
+                wrapper.position.x = Math.cos(angle) * 2.5;
+                wrapper.position.z = Math.sin(angle) * 2.5;
+                wrapper.position.y = Math.sin(time * 2 + i) * 0.15; // Bobbing up and down
+                wrapper.rotation.y += 0.01; // Spinning slowly
+            });
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
