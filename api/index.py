@@ -16,7 +16,7 @@ app.add_middleware(
 )
 
 # Vercel Environment Variable (Secure way to store API keys)
-MESHY_API_KEY = os.environ.get("MESHY_API_KEY", "YOUR_MESHY_API_KEY_HERE")
+MESHY_API_KEY = os.environ.get("MESHY_API_KEY", "msy_XGFW9ksTpnyV6vfvheprTk9KvBUT1Em8rTg8")
 HEADERS = {"Authorization": f"Bearer {MESHY_API_KEY}"}
 
 @app.post("/api/generate-3d")
