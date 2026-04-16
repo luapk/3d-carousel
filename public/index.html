@@ -107,7 +107,9 @@
                         statusText.style.color = '#51cf66';
                         
                         // Pass URL to Three.js
-                        loadModel(statusData.model_url);
+                       // Route the download through our new backend proxy
+                    const proxyUrl = `/api/download-model?url=${encodeURIComponent(statusData.model_url)}`;
+                    loadModel(proxyUrl);
                         
                     } else if (statusData.status === 'processing') {
                         statusText.innerText = `AI Generating... ${statusData.progress}%`;
