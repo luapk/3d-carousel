@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, Response
 from fastapi.middleware.cors import CORSMiddleware
 import requests
 import base64
@@ -58,3 +58,12 @@ def check_status(task_id: str):
     
     # Still processing
     return {"status": "processing", "progress": data.get("progress", 0)}
+
+@app.get("/api/download-model")
+def download_model(url: str):
+    """Proxy the 3D model download to bypass frontend CORS blocks."""
+    # The server fetches the file (no CORS restrictions here)
+    res = requests.get(url)
+    
+    # Return the binary 3D file to the frontend
+    return Response(content=res.content, media_type="model/gltf-binary")
